@@ -9,6 +9,8 @@ import gzip
 import re
 from multiprocessing import Process
 
+import time
+import random
 
 class API(object):
 
@@ -24,25 +26,32 @@ class API(object):
         self._projects = {}
 
     def request(self, method, url, data=None, callback=None,
-            pre_callback=None):
+            pre_callback=None, args=None):
 
         server = self._server
 
-        # See if we're referencing a project and adjust the base_url
+        # See if we're referencing a project and adjust the base url
         # accordingly.
-        m = re.match('/projects/(?P<project_id>[0-9^/]+)/.*', url)
-        if m:
-            project_id = int(m.group('project_id'))
-            server = self._projects[project_id]['instance_url']
+        if args:
+            project_id = args.get('project_id', None)
+            if project_id:
+                server = self._projects[project_id]['instance_url']
+
+        try:
+            if args:
+                url = url % args
+        except TypeError:
+            print url, args
+            raise
 
         url = urlparse.urljoin(server, url)
-        print('%(method)s %(url)s' % locals())
+
         if isinstance(data, dict):
             data = {'data': data}
             data = json.dumps(data)
 
         args = (self._opener, method, url, data, self._headers, callback,
-            pre_callback)
+            pre_callback, args)
 
         if not callback:
             return API.real_request(*args)
@@ -53,12 +62,12 @@ class API(object):
 
     @staticmethod
     def real_request(opener, method, url, data, headers, callback,
-            pre_callback):
+            pre_callback, args):
+        
+        print('%(method)s %(url)s' % locals())
+
         request = urllib2.Request(url, data=data, headers=headers)
         request.get_method = lambda: method
-
-        import time
-        time.sleep(2)
 
         f = opener.open(request)
         headers = f.info()
@@ -74,7 +83,7 @@ class API(object):
             data = pre_callback(data)
 
         if callback:
-            callback(data)
+            callback(data, args=args)
         
         return data
 
@@ -86,15 +95,15 @@ class API(object):
 
     # Requests
 
-    def login(self, username, password, callback=None):
+    def login(self, username, password, **kwargs):
         return self.request('POST', '/session', {
             'username': username,
             'password': hashlib.md5(password).hexdigest(),
-        }, callback=callback)
+        }, **kwargs)
     
-    def get_projects(self, callback=None):
-        return self.request('GET', '/projects', callback=callback,
-                pre_callback=self.get_projects_response)
+    def get_projects(self, **kwargs):
+        return self.request('GET', '/projects', 
+            pre_callback=self.get_projects_response, **kwargs)
 
     def get_projects_response(self, data):
         '''Store all projects and their instance_urls so that any future
@@ -105,7 +114,25 @@ class API(object):
             self._projects[project['id']] = project
         return data
 
-    def get_blockheaders(self, project_id, callback=None):
-        return self.request('GET', '/projects/%(project_id)i/blockheaders' %
-            locals(), callback=callback)
+    def get_blockheaders(self, project_id, **kwargs):
+        url = '/'.join(('projects', '%(project_id)i', 'blockheaders'))
+        return self.request('GET', url, args=locals(), **kwargs)
+
+    def get_formtypeheaders(self, project_id, blockheader_id, **kwargs):
+        url = '/'.join((
+            'projects', '%(project_id)i',
+            'blockheaders', '%(blockheader_id)i',
+            'formtypeheaders'
+            ))
+        return self.request('GET', url, args=locals(), **kwargs)
+
+    def get_filters(self, project_id, blockheader_id, formtypeheader_id,
+            **kwargs):
+        url = '/'.join((
+            'projects', '%(project_id)i',
+            'blockheaders', '%(blockheader_id)i',
+            'formtypeheaders', '%(formtypeheader_id)i',
+            'filters'
+            ))
+        return self.request('GET', url, args=locals(), **kwargs)
 
