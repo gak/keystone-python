@@ -7,10 +7,10 @@ import urllib2
 import cookielib
 import gzip
 import re
-from multiprocessing import Process
-
+import multiprocessing
 import time
 import random
+
 
 class API(object):
 
@@ -22,7 +22,7 @@ class API(object):
         self._headers = {}
         self._headers['Accept'] = 'application/json'
         self._headers['Content-Type'] = 'application/json'
-
+        self._max_children = 10
         self._projects = {}
 
     def request(self, method, url, data=None, callback=None,
@@ -56,8 +56,21 @@ class API(object):
         if not callback:
             return API.real_request(*args)
 
-        p = Process(target=API.real_request, args=args)
-        p.start()
+        
+        # limit concurrent requests
+        p = multiprocessing.Process(target=API.real_request, args=args)
+        while len(multiprocessing.active_children()) >= self._max_children:
+            time.sleep(random.random() * 2)
+
+        # occasionally the os fails os.fork(), this loop retries it
+        while 1:
+            try:
+                p.start()
+                break
+            except OSError, e:
+                print 'retrying after', e
+                time.sleep(0.1)
+
         return p
 
     @staticmethod
